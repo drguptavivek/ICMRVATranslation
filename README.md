@@ -39,9 +39,27 @@ flask run
 Open:
 
 ```text
-http://127.0.0.1:5000/
-http://127.0.0.1:5000/health
+http://127.0.0.1:8000/
+http://127.0.0.1:8000/health
 ```
+
+## Linux system service
+
+Install the application at `/opt/icmrva`, create an unprivileged `icmrva` user,
+and create its environment file from `.env.template` at
+`/etc/icmrva/icmrva.env`. Keep that file readable only by root and the service
+account. The supplied service example runs Gunicorn on the host and port set in
+that environment file:
+
+```bash
+sudo cp deploy/icmrva.service.example /etc/systemd/system/icmrva.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now icmrva.service
+sudo systemctl status icmrva.service
+```
+
+Place a reverse proxy in front of `127.0.0.1:8000` for HTTPS access.
+See `LOCAL_DEPLOYMENT.md` for the complete setup and upgrade procedure.
 
 ## Configuration
 

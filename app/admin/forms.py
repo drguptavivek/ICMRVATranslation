@@ -10,7 +10,7 @@ from app.models import User
 class ReviewerForm(FlaskForm):
     username = StringField("Username", validators=[DataRequired(), Length(max=80)])
     email = StringField("Email", validators=[DataRequired(), Length(max=255)])
-    password = PasswordField("Password", validators=[Optional(), Length(min=8)])
+    password = PasswordField("Password", validators=[Optional(), Length(min=12, max=128)])
     password_confirm = PasswordField(
         "Confirm password",
         validators=[EqualTo("password", message="Passwords must match.")],

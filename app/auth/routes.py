@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from urllib.parse import urlsplit
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from sqlalchemy import or_
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -67,6 +67,7 @@ def login():
             db.session.delete(attempt)
             db.session.commit()
         login_user(user)
+        session.permanent = True
         return redirect(_post_login_url(user))
 
     return render_template("auth/login.html", form=form)

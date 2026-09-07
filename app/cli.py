@@ -16,6 +16,9 @@ def create_admin():
     email = click.prompt("Email").strip()
     password = click.prompt("Password", hide_input=True, confirmation_prompt=True)
 
+    if not 12 <= len(password) <= 128:
+        raise click.ClickException("Password must be between 12 and 128 characters.")
+
     if "@" not in email:
         raise click.ClickException("Enter a valid email address.")
 

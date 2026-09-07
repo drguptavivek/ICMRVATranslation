@@ -1,0 +1,35 @@
+[Unit]
+Description=ICMRVA Translation Review Portal
+After=network.target
+
+[Service]
+Type=notify
+User=icmrva
+Group=icmrva
+WorkingDirectory=/opt/icmrva
+EnvironmentFile=/etc/icmrva/icmrva.env
+ExecStart=/opt/icmrva/.venv/bin/gunicorn --config /opt/icmrva/gunicorn.conf.py run:app
+ExecReload=/bin/kill -s HUP $MAINPID
+KillSignal=SIGQUIT
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/opt/icmrva/instance
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

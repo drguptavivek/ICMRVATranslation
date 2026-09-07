@@ -3,6 +3,7 @@ Flask-SQLAlchemy
 Flask-Migrate
 Flask-Login
 Flask-WTF
+gunicorn
 openpyxl
 python-dotenv
 psycopg2-binary
