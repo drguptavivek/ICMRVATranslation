@@ -421,6 +421,72 @@ class CompactReviewerWorkflowTestCase(unittest.TestCase):
         self.assertEqual(self.review("choices", 3).edited_translation, "Edited female")
         self.assertTrue(response.get_json()["is_edited"])
 
+    def test_shared_choice_save_has_one_db_review_and_updates_all_parent_payloads(self):
+        self.login()
+        first_item = SurveyItem.query.filter_by(name="Id10017").first()
+        second_item = SurveyItem.query.filter_by(name="Id10018").first()
+        male = ChoiceItem.query.filter_by(xlsform_id=self.xlsform.id, list_name="sex", name="male").first()
+
+        first_response = self.client.post(
+            f"/reviewer/review/{first_item.id}/save",
+            data={
+                "question_translation": "Prashn 17",
+                f"choice_{male.id}": "Shared male",
+                "choice_999999": "Must not be echoed",
+            },
+        )
+        first_payload = first_response.get_json()
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(first_payload["choices"], {str(male.id): "Shared male"})
+        self.assertNotIn("999999", first_payload["choices"])
+        self.assertEqual(
+            set(first_payload["affected_question_ids"]),
+            {first_item.id, second_item.id},
+        )
+        self.assertEqual(
+            set(first_payload["edited_question_ids"]),
+            {first_item.id, second_item.id},
+        )
+
+        second_response = self.client.post(
+            f"/reviewer/review/{second_item.id}/save",
+            data={
+                "question_translation": "Prashn 18",
+                f"choice_{male.id}": "Shared male final",
+            },
+        )
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(
+            TranslationReview.query.filter_by(
+                xlsform_id=self.xlsform.id,
+                language_id=self.hindi.id,
+                sheet_name="choices",
+                row_number=male.row_number,
+                field_name="label",
+            ).count(),
+            1,
+        )
+        self.assertEqual(self.review("choices", male.row_number).edited_translation, "Shared male final")
+
+        page = self.client.get("/reviewer/review")
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page.data.count(f'data-choice-id="{male.id}"'.encode()), 2)
+        self.assertEqual(self.question_row_html(page, first_item).count(b"Shared male final"), 2)
+        self.assertEqual(self.question_row_html(page, second_item).count(b"Shared male final"), 2)
+        self.assertIn(f'id="edited-badge-{first_item.id}"'.encode(), page.data)
+        self.assertIn(f'id="edited-badge-{second_item.id}"'.encode(), page.data)
+
+    def test_shared_choice_markup_and_cache_update_use_all_matching_nodes(self):
+        self.login()
+        response = self.client.get("/reviewer/review")
+
+        self.assertNotIn(b'id="choice-display-', response.data)
+        self.assertIn(b'class="review-option text-muted review-rich-text choice-display" data-choice-id=', response.data)
+        self.assertIn(b'.choice-display[data-choice-id="${choiceId}"]', response.data)
+        self.assertIn(b'document.querySelectorAll(".edit-question").forEach((button) => {', response.data)
+
     def test_choice_edit_creates_history_entry(self):
         self.login()
         item = SurveyItem.query.filter_by(name="Id10017").first()
@@ -1188,7 +1254,7 @@ def make_review_workbook():
     survey.append(["end_group", None, None, None, None, None, None])
     survey.append(
         [
-            "text",
+            "select_one sex",
             "Id10018",
             "Question 18 English",
             "Question 18 English\nPrashn 18",

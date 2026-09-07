@@ -82,6 +82,10 @@ def xlsforms():
             flash(str(exc), "danger")
             return redirect(url_for("admin.xlsforms"))
 
+        previous_xlsform = XLSForm.query.order_by(
+            XLSForm.uploaded_at.desc(),
+            XLSForm.id.desc(),
+        ).first()
         uploaded_file.stream.seek(0)
         stored_filename = _save_uploaded_xlsform(uploaded_file, original_filename)
         xlsform = XLSForm(
@@ -99,7 +103,11 @@ def xlsforms():
         db.session.add(xlsform)
         ensure_detected_languages(parse_result.languages)
         db.session.flush()
-        import_result = import_questionnaire_content(xlsform, parse_result)
+        import_result = import_questionnaire_content(
+            xlsform,
+            parse_result,
+            previous_xlsform=previous_xlsform,
+        )
         db.session.commit()
 
         import_summary = {

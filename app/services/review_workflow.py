@@ -299,7 +299,7 @@ def edited_question_ids_for_reviews(displayed_items, choices_by_list, reviews, u
     choice_parent_by_row = {}
     for item in displayed_items:
         for choice in choices_by_list.get(item.list_name, []):
-            choice_parent_by_row[choice.row_number] = item.id
+            choice_parent_by_row.setdefault(choice.row_number, set()).add(item.id)
 
     edited_question_ids = set()
     for (sheet_name, row_number, _field_name), review in reviews.items():
@@ -310,7 +310,7 @@ def edited_question_ids_for_reviews(displayed_items, choices_by_list, reviews, u
         if sheet_name == "survey" and row_number in survey_parent_by_row:
             edited_question_ids.add(survey_parent_by_row[row_number])
         elif sheet_name == "choices" and row_number in choice_parent_by_row:
-            edited_question_ids.add(choice_parent_by_row[row_number])
+            edited_question_ids.update(choice_parent_by_row[row_number])
     return edited_question_ids
 
 
@@ -396,10 +396,11 @@ def save_question_with_choices(
     supporting_values=None,
 ):
     assignment = get_or_create_form_assignment(user, xlsform, language)
-    editable_questions = {item.id: item for item in displayed_survey_items_query(xlsform).all()}
+    displayed_items = displayed_survey_items_query(xlsform).all()
+    editable_questions = {item.id: item for item in displayed_items}
     item = editable_questions.get(question_id)
     if item is None:
-        return None, 0, False
+        return None, 0, False, set(), set(), {}
 
     choices_by_list = choice_items_by_list_name(xlsform)
     choices_by_id = {
@@ -408,6 +409,7 @@ def save_question_with_choices(
     }
     reviews = reviews_by_key(xlsform, language)
     changed_count = 0
+    saved_choice_values = {}
     review, changed = _save_item_value(
         user=user,
         xlsform=xlsform,
@@ -453,6 +455,7 @@ def save_question_with_choices(
         choice = choices_by_id.get(choice_id)
         if choice is None:
             continue
+        saved_choice_values[choice_id] = submitted_value
         review, changed = _save_item_value(
             user=user,
             xlsform=xlsform,
@@ -472,12 +475,28 @@ def save_question_with_choices(
 
     assignment.mark_saved()
     edited_question_ids = edited_question_ids_for_reviews(
-        [item],
-        {item.list_name: list(choices_by_id.values())},
+        displayed_items,
+        choices_by_list,
         reviews,
         user,
     )
-    return item, changed_count, item.id in edited_question_ids
+    affected_question_ids = {item.id}
+    saved_choice_ids = set(saved_choice_values)
+    if saved_choice_ids:
+        for candidate in displayed_items:
+            if any(
+                choice.id in saved_choice_ids
+                for choice in visible_choices_for_item(candidate, choices_by_list, language)
+            ):
+                affected_question_ids.add(candidate.id)
+    return (
+        item,
+        changed_count,
+        item.id in edited_question_ids,
+        affected_question_ids,
+        edited_question_ids,
+        saved_choice_values,
+    )
 
 
 def changed_reviews_for_assignment(assignment):

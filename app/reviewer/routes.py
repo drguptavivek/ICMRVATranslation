@@ -140,7 +140,14 @@ def save_review_item(item_id):
                 supporting_values[field_name] = str(sanitize_rich_html(value))
 
     submitted_translation = str(sanitize_rich_html(request.form.get("question_translation", "").strip()))
-    item, changed_count, is_edited = save_question_with_choices(
+    (
+        item,
+        changed_count,
+        is_edited,
+        affected_question_ids,
+        edited_question_ids,
+        saved_choice_values,
+    ) = save_question_with_choices(
         current_user,
         xlsform,
         language,
@@ -159,13 +166,18 @@ def save_review_item(item_id):
             "question_id": item.id,
             "translation": submitted_translation,
             "translation_html": str(clean_html_for_display(submitted_translation)),
-            "choices": {str(key): value.strip() for key, value in choice_values.items()},
-            "choice_html": {str(key): str(clean_html_for_display(value.strip())) for key, value in choice_values.items()},
+            "choices": {str(key): value.strip() for key, value in saved_choice_values.items()},
+            "choice_html": {
+                str(key): str(clean_html_for_display(value.strip()))
+                for key, value in saved_choice_values.items()
+            },
             "supporting": supporting_values,
             "supporting_html": {
                 key: str(clean_html_for_display(value.strip()))
                 for key, value in supporting_values.items()
             },
             "is_edited": is_edited,
+            "affected_question_ids": sorted(affected_question_ids),
+            "edited_question_ids": sorted(edited_question_ids),
         }
     )

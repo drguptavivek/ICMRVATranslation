@@ -98,7 +98,7 @@
                 {% for choice_row in node.choices %}<div class="review-option">{% if node.control_type %}<input class="form-check-input compact-choice-input me-1" type="{{ node.control_type }}" disabled>{% endif %}{{ choice_row.english }}</div>{% endfor %}
               </td>
               <td>
-                {% for choice_row in node.choices %}<div class="review-option text-muted review-rich-text" id="choice-display-{{ choice_row.choice.id }}">{{ choice_row.value_html }}</div>{% endfor %}
+                {% for choice_row in node.choices %}<div class="review-option text-muted review-rich-text choice-display" data-choice-id="{{ choice_row.choice.id }}">{{ choice_row.value_html }}</div>{% endfor %}
               </td>
               <td class="review-actions">
                 <span class="badge text-bg-warning edited-badge{% if not node.is_edited %} d-none{% endif %}" id="edited-badge-{{ question.id }}">Edited</span>
@@ -354,10 +354,9 @@
         const result = await response.json();
         document.getElementById(`translation-${result.question_id}`).innerHTML = result.translation_html;
         Object.entries(result.choices).forEach(([choiceId, value]) => {
-          const choiceDisplay = document.getElementById(`choice-display-${choiceId}`);
-          if (choiceDisplay) {
+          document.querySelectorAll(`.choice-display[data-choice-id="${choiceId}"]`).forEach((choiceDisplay) => {
             choiceDisplay.innerHTML = result.choice_html[choiceId];
-          }
+          });
         });
         Object.entries(result.supporting || {}).forEach(([fieldName, value]) => {
           const fieldDisplay = document.getElementById(`support-display-${result.question_id}-${fieldName}`);
@@ -365,25 +364,30 @@
             fieldDisplay.innerHTML = result.supporting_html[fieldName];
           }
         });
-        const questionRow = document.getElementById(`question-row-${result.question_id}`);
-        const editedBadge = document.getElementById(`edited-badge-${result.question_id}`);
-        if (questionRow) {
-          questionRow.classList.toggle("compact-question-edited", Boolean(result.is_edited));
-        }
-        if (editedBadge) {
-          editedBadge.classList.toggle("d-none", !result.is_edited);
-        }
-        const button = document.querySelector(`.edit-question[data-question-id="${result.question_id}"]`);
-        if (button) {
-          button.dataset.translation = JSON.stringify(result.translation);
-          const supporting = JSON.parse(button.dataset.supporting || "[]").map((field) => {
-            if (Object.prototype.hasOwnProperty.call(result.supporting, field.field_name)) {
-              field.editor_html = result.supporting[field.field_name];
-              field.value_html = result.supporting_html[field.field_name];
-            }
-            return field;
-          });
-          button.dataset.supporting = JSON.stringify(supporting);
+        const editedQuestionIds = new Set((result.edited_question_ids || []).map((questionId) => String(questionId)));
+        (result.affected_question_ids || [result.question_id]).forEach((questionId) => {
+          const questionRow = document.getElementById(`question-row-${questionId}`);
+          const editedBadge = document.getElementById(`edited-badge-${questionId}`);
+          const isEdited = editedQuestionIds.has(String(questionId));
+          if (questionRow) {
+            questionRow.classList.toggle("compact-question-edited", isEdited);
+          }
+          if (editedBadge) {
+            editedBadge.classList.toggle("d-none", !isEdited);
+          }
+        });
+        document.querySelectorAll(".edit-question").forEach((button) => {
+          if (button.dataset.questionId === String(result.question_id)) {
+            button.dataset.translation = JSON.stringify(result.translation);
+            const supporting = JSON.parse(button.dataset.supporting || "[]").map((field) => {
+              if (Object.prototype.hasOwnProperty.call(result.supporting, field.field_name)) {
+                field.editor_html = result.supporting[field.field_name];
+                field.value_html = result.supporting_html[field.field_name];
+              }
+              return field;
+            });
+            button.dataset.supporting = JSON.stringify(supporting);
+          }
           const choices = JSON.parse(button.dataset.choices || "[]").map((choice) => {
             if (Object.prototype.hasOwnProperty.call(result.choices, String(choice.id))) {
               choice.value = result.choices[String(choice.id)];
@@ -391,7 +395,7 @@
             return choice;
           });
           button.dataset.choices = JSON.stringify(choices);
-        }
+        });
         isDirty = false;
         unsavedIndicator.classList.add("d-none");
         savedIndicator.classList.remove("d-none");
