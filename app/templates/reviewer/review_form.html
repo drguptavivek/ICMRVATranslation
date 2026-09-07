@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+
+{% macro messages(items) %}
+  {% for message in items %}
+    <div class="review-message"><strong>{{ message.label }}:</strong> {{ message.value }}</div>
+  {% endfor %}
+{% endmacro %}
+
+{% block title %}Review Form - ICMRVA Tool Review{% endblock %}
+
+{% block content %}
+  <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-2">
+    <div>
+      <div class="text-muted small">Form: {{ xlsform.form_title or xlsform.original_filename }}</div>
+      <div class="text-muted small">Assigned Language: {{ language.display_name }}{% if language.language_code %} ({{ language.language_code }}){% endif %}</div>
+      <div class="text-muted small">Status: {{ assignment.status }}</div>
+      <div class="text-muted small">Last Saved: {{ assignment.last_saved_at or "Not saved yet" }}</div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <span id="saved-indicator" class="badge text-bg-success d-none">Saved</span>
+      <span id="unsaved-indicator" class="badge text-bg-warning d-none">Unsaved Changes</span>
+    </div>
+  </div>
+
+  <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <button
+      class="btn btn-sm btn-outline-secondary"
+      type="button"
+      data-bs-toggle="offcanvas"
+      data-bs-target="#editHistoryPanel"
+      aria-controls="editHistoryPanel"
+    >Edit History ({{ history_entries|length }} changes)</button>
+    <button class="btn btn-sm btn-outline-primary" type="button" id="print-form-button">Print Complete Form</button>
+    <form id="finish-form-top" method="post" class="mb-0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-sm btn-primary" type="submit">Finish / Save Form</button>
+    </form>
+  </div>
+
+  <div id="review-list" class="table-responsive review-table-wrap">
+    {% if review_rows %}
+      <table class="table table-sm table-bordered align-middle review-table mb-0">
+        <thead class="table-light">
+          <tr>
+            <th scope="col" class="review-serial">No.</th>
+            <th scope="col">English</th>
+            <th scope="col">{{ language.display_name }}</th>
+            <th scope="col">Options (English)</th>
+            <th scope="col">Options ({{ language.display_name }})</th>
+            <th scope="col" class="review-actions"><span class="visually-hidden">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for node in review_rows %}
+            {% set question = node.question %}
+            <tr class="compact-question{% if node.is_edited %} compact-question-edited{% endif %}" id="question-row-{{ question.id }}">
+              <td class="review-serial">
+                <span class="fw-semibold">{{ node.serial }}</span>
+                {% if node.type_label %}<span class="badge text-bg-info">{{ node.type_label }}</span>{% endif %}
+              </td>
+              <td class="review-rich-text">
+                {{ node.english }}
+                {% if translation_language_code and translation_language_code != "en" %}
+                  <div class="translate-action-wrap">
+                    <a
+                      class="translate-action"
+                      href="https://translate.google.com/?sl=en&amp;tl={{ translation_language_code|urlencode }}&amp;text={{ node.english_text|urlencode }}&amp;op=translate"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="Open this question in Google Translate in a new tab"
+                    >
+                      <svg class="translate-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12.9 15.1 10.7 13l.1-.1a15.7 15.7 0 0 0 3.2-5.6h2.5V5.5h-6V3.7H8.7v1.8h-6v1.8h9.6a13.5 13.5 0 0 1-2.8 4.6 13.5 13.5 0 0 1-2-2.9H5.7a15.2 15.2 0 0 0 2.6 4.1L3.9 17.4l1.3 1.3 4.3-4.3 2.7 2.7.7-2Zm5-4.2h-1.8l-4 9.4h1.9l1-2.4h4l1 2.4h1.9l-4-9.4Zm-2.2 5.3 1.3-3.3 1.3 3.3h-2.6Z"/>
+                      </svg>
+                      <span>Translate</span>
+                      <svg class="translate-action-arrow" viewBox="0 0 16 16" aria-hidden="true">
+                        <path d="M6.2 3.5h6.3v6.3h-1.4V5.9l-6.7 6.7-1-1 6.7-6.7H6.2V3.5Z"/>
+                      </svg>
+                    </a>
+                  </div>
+                {% endif %}
+                {{ messages(node.english_messages) }}
+              </td>
+              <td>
+                <div class="review-rich-text" id="translation-{{ question.id }}">{{ node.value_html }}</div>
+                {{ messages(node.local_messages) }}
+              </td>
+              <td>
+                {% for choice_row in node.choices %}<div class="review-option">{% if node.control_type %}<input class="form-check-input compact-choice-input me-1" type="{{ node.control_type }}" disabled>{% endif %}{{ choice_row.english }}</div>{% endfor %}
+              </td>
+              <td>
+                {% for choice_row in node.choices %}<div class="review-option text-muted review-rich-text" id="choice-display-{{ choice_row.choice.id }}">{{ choice_row.value_html }}</div>{% endfor %}
+              </td>
+              <td class="review-actions">
+                <span class="badge text-bg-warning edited-badge{% if not node.is_edited %} d-none{% endif %}" id="edited-badge-{{ question.id }}">Edited</span>
+                <button class="btn btn-sm btn-outline-primary edit-question" type="button" data-bs-toggle="modal" data-bs-target="#editTranslationModal" data-question-id="{{ question.id }}" data-english='{{ node.english_text|tojson }}' data-translation='{{ node.value_html|string|tojson }}' data-control-type="{{ node.control_type or '' }}" data-choices='{{ node.modal_choices|tojson }}'>Edit</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No reviewable questions are available for your assigned language.</p>
+    {% endif %}
+  </div>
+
+  {% if review_rows %}
+    <div class="border-top mt-3 pt-3 text-center">
+      <form id="finish-form-bottom" method="post" class="mb-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-primary" type="submit">Finish / Save Form</button>
+      </form>
+    </div>
+  {% endif %}
+
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="editHistoryPanel" aria-labelledby="editHistoryTitle">
+    <div class="offcanvas-header">
+      <h2 class="offcanvas-title h5" id="editHistoryTitle">Edit History ({{ history_entries|length }} changes)</h2>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body">
+      {% if history_entries %}
+        {% for entry in history_entries %}
+          <section class="border-bottom pb-3 mb-3">
+            {% if entry.question_id %}
+              <div class="small text-muted">Question ID: {{ entry.question_id }}</div>
+            {% endif %}
+            <div class="small text-muted">Type: {{ entry.item_type }}</div>
+            <div class="mt-2 small fw-semibold">English:</div>
+            <div class="small white-space-pre-line">{{ entry.english }}</div>
+            <div class="mt-2 small fw-semibold">Previous:</div>
+            <div class="small white-space-pre-line">{{ entry.old_value }}</div>
+            <div class="mt-2 small fw-semibold">Changed to:</div>
+            <div class="small white-space-pre-line">{{ entry.new_value }}</div>
+            <div class="mt-2 small text-muted">Changed: {{ entry.created_at.strftime("%d %b %Y, %I:%M %p") }}</div>
+          </section>
+        {% endfor %}
+      {% else %}
+        <p class="text-muted small">No edit history yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="modal fade" id="editTranslationModal" tabindex="-1" aria-labelledby="editTranslationTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg review-edit-modal-dialog">
+      <div class="modal-content">
+        <form id="modal-edit-form" method="post">
+          <div class="modal-header py-2">
+            <h2 class="modal-title h5" id="editTranslationTitle">Edit Translation</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" id="modal-question-id">
+            <div class="small fw-semibold">English:</div>
+            <div id="modal-english" class="border rounded p-2 bg-light white-space-pre-line mb-2"></div>
+            <label class="form-label" for="modal-question-editor">Current Translation</label>
+            <div class="rich-editor-toolbar btn-toolbar mb-1" role="toolbar" aria-label="Formatting">
+              <div class="btn-group btn-group-sm me-2" role="group">
+                <button class="btn btn-outline-secondary rich-command fw-bold" type="button" data-command="bold" title="Bold" aria-label="Bold">B</button>
+                <button class="btn btn-outline-secondary rich-command fst-italic" type="button" data-command="italic" title="Italic" aria-label="Italic">I</button>
+                <button class="btn btn-outline-secondary rich-command text-decoration-underline" type="button" data-command="underline" title="Underline" aria-label="Underline">U</button>
+              </div>
+              <label class="rich-color-label" title="Text color"><span class="visually-hidden">Text color</span><input id="rich-text-color" type="color" value="#dc3545"></label>
+            </div>
+            <div class="form-control rich-editor" id="modal-question-editor" contenteditable="true" role="textbox" aria-multiline="true"></div>
+            <input type="hidden" id="modal-question-translation" name="question_translation">
+            <div id="modal-choices" class="mt-3"></div>
+          </div>
+          <div class="modal-footer py-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const modalElement = document.getElementById("editTranslationModal");
+      const modalForm = document.getElementById("modal-edit-form");
+      const modalQuestionId = document.getElementById("modal-question-id");
+      const modalEnglish = document.getElementById("modal-english");
+      const modalTranslation = document.getElementById("modal-question-translation");
+      const modalEditor = document.getElementById("modal-question-editor");
+      const modalChoices = document.getElementById("modal-choices");
+      const savedIndicator = document.getElementById("saved-indicator");
+      const unsavedIndicator = document.getElementById("unsaved-indicator");
+      let activeEditor = modalEditor;
+      let isDirty = false;
+      let activeEditButton = null;
+
+      const decodeJson = (value) => JSON.parse(value || "null");
+      const setDirty = () => {
+        isDirty = true;
+        savedIndicator.classList.add("d-none");
+        unsavedIndicator.classList.remove("d-none");
+      };
+
+      const openEditor = (button) => {
+        activeEditButton = button;
+        const choices = decodeJson(button.dataset.choices) || [];
+        modalQuestionId.value = button.dataset.questionId;
+        modalEnglish.textContent = decodeJson(button.dataset.english) || "";
+        modalEditor.innerHTML = decodeJson(button.dataset.translation) || "";
+        activeEditor = modalEditor;
+        modalTranslation.value = modalEditor.innerHTML;
+        modalChoices.innerHTML = "";
+
+        if (choices.length > 0) {
+          const heading = document.createElement("div");
+          heading.className = "d-flex justify-content-between align-items-center mb-2";
+          const headingText = document.createElement("span");
+          headingText.className = "fw-semibold";
+          headingText.textContent = "Options";
+          heading.appendChild(headingText);
+          modalChoices.appendChild(heading);
+        }
+
+        choices.forEach((choice) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "mb-2";
+          const choiceHeader = document.createElement("div");
+          choiceHeader.className = "d-flex align-items-center gap-2 small mb-1";
+          if (button.dataset.controlType) {
+            const indicator = document.createElement("input");
+            indicator.className = "form-check-input compact-choice-input";
+            indicator.type = button.dataset.controlType;
+            indicator.disabled = true;
+            choiceHeader.appendChild(indicator);
+          }
+          const english = document.createElement("span");
+          english.textContent = choice.english;
+          choiceHeader.appendChild(english);
+          const textarea = document.createElement("div");
+          textarea.className = "form-control form-control-sm rich-editor rich-choice-editor";
+          textarea.contentEditable = "true";
+          textarea.dataset.inputName = `choice_${choice.id}`;
+          textarea.innerHTML = choice.value || "";
+          textarea.addEventListener("input", setDirty);
+          textarea.addEventListener("focus", () => { activeEditor = textarea; });
+          wrapper.appendChild(choiceHeader);
+          wrapper.appendChild(textarea);
+          modalChoices.appendChild(wrapper);
+        });
+        isDirty = false;
+        unsavedIndicator.classList.add("d-none");
+      };
+
+      document.querySelectorAll(".edit-question").forEach((button) => {
+        button.addEventListener("click", () => {
+          openEditor(button);
+        });
+      });
+
+      modalEditor.addEventListener("input", setDirty);
+      modalEditor.addEventListener("focus", () => { activeEditor = modalEditor; });
+      document.querySelectorAll(".rich-command").forEach((button) => {
+        button.addEventListener("mousedown", (event) => {
+          event.preventDefault();
+          activeEditor.focus();
+          document.execCommand("styleWithCSS", false, true);
+          document.execCommand(button.dataset.command, false);
+          setDirty();
+        });
+      });
+      document.getElementById("rich-text-color").addEventListener("input", (event) => {
+        activeEditor.focus();
+        document.execCommand("styleWithCSS", false, true);
+        document.execCommand("foreColor", false, event.target.value);
+        setDirty();
+      });
+
+      modalForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const questionId = modalQuestionId.value;
+        modalForm.querySelectorAll(".generated-choice-input").forEach((input) => input.remove());
+        modalTranslation.value = modalEditor.innerHTML;
+        modalChoices.querySelectorAll(".rich-choice-editor").forEach((editor) => {
+          const input = document.createElement("input");
+          input.type = "hidden";
+          input.className = "generated-choice-input";
+          input.name = editor.dataset.inputName;
+          input.value = editor.innerHTML;
+          modalForm.appendChild(input);
+        });
+        const formData = new FormData(modalForm);
+        const response = await fetch(`{{ url_for("reviewer.review") }}/${questionId}/save`, {
+          method: "POST",
+          body: formData,
+          headers: {"X-Requested-With": "fetch"}
+        });
+        if (!response.ok) {
+          return;
+        }
+        const result = await response.json();
+        document.getElementById(`translation-${result.question_id}`).innerHTML = result.translation_html;
+        Object.entries(result.choices).forEach(([choiceId, value]) => {
+          const choiceDisplay = document.getElementById(`choice-display-${choiceId}`);
+          if (choiceDisplay) {
+            choiceDisplay.innerHTML = result.choice_html[choiceId];
+          }
+        });
+        const questionRow = document.getElementById(`question-row-${result.question_id}`);
+        const editedBadge = document.getElementById(`edited-badge-${result.question_id}`);
+        if (questionRow) {
+          questionRow.classList.toggle("compact-question-edited", Boolean(result.is_edited));
+        }
+        if (editedBadge) {
+          editedBadge.classList.toggle("d-none", !result.is_edited);
+        }
+        const button = document.querySelector(`.edit-question[data-question-id="${result.question_id}"]`);
+        if (button) {
+          button.dataset.translation = JSON.stringify(result.translation);
+          const choices = JSON.parse(button.dataset.choices || "[]").map((choice) => {
+            if (Object.prototype.hasOwnProperty.call(result.choices, String(choice.id))) {
+              choice.value = result.choices[String(choice.id)];
+            }
+            return choice;
+          });
+          button.dataset.choices = JSON.stringify(choices);
+        }
+        isDirty = false;
+        unsavedIndicator.classList.add("d-none");
+        savedIndicator.classList.remove("d-none");
+        bootstrap.Modal.getOrCreateInstance(modalElement).hide();
+      });
+
+      window.addEventListener("beforeunload", (event) => {
+        if (!isDirty) {
+          return;
+        }
+        event.preventDefault();
+        event.returnValue = "";
+      });
+
+      document.getElementById("print-form-button").addEventListener("click", () => {
+        window.print();
+      });
+    })();
+  </script>
+{% endblock %}

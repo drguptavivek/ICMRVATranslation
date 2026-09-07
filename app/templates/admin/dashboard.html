@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard - ICMRVA Tool Review{% endblock %}
+
+{% block content %}
+  <h1 class="h3 mb-3">Admin Dashboard</h1>
+  <div class="row g-3">
+    <div class="col-sm-6 col-lg-4">
+      <div class="border rounded p-3">
+        <div class="text-muted small">Reviewers</div>
+        <div class="fs-4">{{ reviewer_count }}</div>
+      </div>
+    </div>
+    <div class="col-sm-6 col-lg-4">
+      <div class="border rounded p-3">
+        <div class="text-muted small">Languages</div>
+        <div class="fs-4">{{ language_count }}</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="h4 mt-4 mb-3">Reviewer Form Status</h2>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Language</th>
+          <th>Reviewer</th>
+          <th>XLSForm</th>
+          <th>Status</th>
+          <th>Last Saved</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for assignment in form_assignments %}
+          <tr>
+            <td>{{ assignment.language.display_name }}</td>
+            <td>{{ assignment.reviewer.username }}</td>
+            <td>{{ assignment.xlsform.form_title or assignment.xlsform.original_filename }}</td>
+            <td>{{ assignment.status }}</td>
+            <td>{{ assignment.last_saved_at|display_datetime if assignment.last_saved_at else "Not saved yet" }}</td>
+            <td>
+              <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('admin.view_assignment_changes', assignment_id=assignment.id) }}">View Changes</a>
+                {% if assignment.status == "Saved" %}
+                  <a class="btn btn-sm btn-primary" href="{{ url_for('admin.download_assignment_xlsform', assignment_id=assignment.id) }}">Download Edited XLSForm</a>
+                {% else %}
+                  <button class="btn btn-sm btn-primary" type="button" disabled>Download Edited XLSForm</button>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6">No reviewer form activity yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+
+{% block title %}XLSForms - ICMRVA Tool Review{% endblock %}
+
+{% block content %}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">XLSForms</h1>
+  </div>
+
+  <form method="post" enctype="multipart/form-data" class="border rounded p-3 mb-4" novalidate>
+    {{ form.hidden_tag() }}
+    <div class="mb-3">
+      {{ form.xlsform_file.label(class="form-label") }}
+      {{ form.xlsform_file(class="form-control", accept=".xlsx") }}
+      {% for error in form.xlsform_file.errors %}
+        <div class="invalid-feedback d-block">{{ error }}</div>
+      {% endfor %}
+    </div>
+    {{ form.submit(class="btn btn-primary", value="Upload XLSForm") }}
+  </form>
+
+  {% if import_summary %}
+    {% set xlsform = import_summary.xlsform %}
+    <section class="mb-4">
+      <h2 class="h4 mb-3">Import Summary</h2>
+      <dl class="row">
+        <dt class="col-sm-3">Original filename</dt>
+        <dd class="col-sm-9">{{ xlsform.original_filename }}</dd>
+        <dt class="col-sm-3">Form title</dt>
+        <dd class="col-sm-9">{{ xlsform.form_title or "Not available" }}</dd>
+        <dt class="col-sm-3">Form ID</dt>
+        <dd class="col-sm-9">{{ xlsform.form_id or "Not available" }}</dd>
+        <dt class="col-sm-3">XLSForm version</dt>
+        <dd class="col-sm-9">{{ xlsform.version or "Not available" }}</dd>
+        <dt class="col-sm-3">Survey rows</dt>
+        <dd class="col-sm-9">{{ xlsform.survey_row_count }}</dd>
+        <dt class="col-sm-3">Choice rows</dt>
+        <dd class="col-sm-9">{{ xlsform.choices_row_count }}</dd>
+        <dt class="col-sm-3">Languages detected</dt>
+        <dd class="col-sm-9">{{ xlsform.detected_language_count }}</dd>
+        {% if import_summary.import_result %}
+          <dt class="col-sm-3">Reviewable survey items</dt>
+          <dd class="col-sm-9">{{ import_summary.import_result.reviewable_survey_items }}</dd>
+          <dt class="col-sm-3">Skipped survey rows</dt>
+          <dd class="col-sm-9">{{ import_summary.import_result.skipped_survey_items }}</dd>
+        {% endif %}
+      </dl>
+
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Language</th>
+              <th>Code</th>
+              <th>Exact Excel Header</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for language in import_summary.languages %}
+              <tr>
+                <td>{{ language.display_name }}</td>
+                <td>{{ language.language_code or "" }}</td>
+                <td>{{ language.excel_header }}</td>
+              </tr>
+            {% else %}
+              <tr>
+                <td colspan="3">No language columns were detected.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+
+  <h2 class="h4 mb-3">Uploaded XLSForms</h2>
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Original filename</th>
+          <th>Form title</th>
+          <th>Form ID</th>
+          <th>Survey items</th>
+          <th>Choices</th>
+          <th>Status</th>
+          <th>Languages</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for xlsform in xlsforms %}
+          <tr>
+            <td>{{ xlsform.original_filename }}</td>
+            <td>{{ xlsform.form_title or "" }}</td>
+            <td>{{ xlsform.form_id or "" }}</td>
+            <td>{{ xlsform.survey_items|length }}</td>
+            <td>{{ xlsform.choice_items|length }}</td>
+            <td>{{ xlsform.status }}</td>
+            <td>{{ xlsform.detected_language_count }}</td>
+            <td class="text-end">
+              <form action="{{ url_for('admin.import_xlsform_content', xlsform_id=xlsform.id) }}" method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-primary" type="submit">
+                  {{ "Re-import Content" if xlsform.survey_items else "Import Content" }}
+                </button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8">No XLSForms have been uploaded yet.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

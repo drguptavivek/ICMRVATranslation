@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}My Review - ICMRVA Tool Review{% endblock %}
+
+{% block content %}
+  <h1 class="h3 mb-3">Welcome, {{ current_user.username }}</h1>
+  <h2 class="h5">Assigned Language(s)</h2>
+  {% if current_user.language_assignments %}
+    <ul>
+      {% for assignment in current_user.language_assignments %}
+        <li>{{ assignment.language.display_name }}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>No language has been assigned to your account.</p>
+  {% endif %}
+
+  <section class="mt-4">
+    <h2 class="h5">Assigned XLSForm</h2>
+    {% if language and xlsform %}
+      <dl class="row">
+        <dt class="col-sm-4">Active language</dt>
+        <dd class="col-sm-8">{{ language.display_name }}</dd>
+        <dt class="col-sm-4">Assigned XLSForm</dt>
+        <dd class="col-sm-8">{{ xlsform.form_title or xlsform.original_filename }}</dd>
+        <dt class="col-sm-4">Form status</dt>
+        <dd class="col-sm-8">{{ assignment.status }}</dd>
+        <dt class="col-sm-4">Last saved</dt>
+        <dd class="col-sm-8">{{ assignment.last_saved_at or "Not saved yet" }}</dd>
+        <dt class="col-sm-4">Reviewable questions</dt>
+        <dd class="col-sm-8">{{ total_questions }}</dd>
+      </dl>
+      <a class="btn btn-primary" href="{{ url_for('reviewer.review') }}">Open Form</a>
+    {% elif not language %}
+      <p>No language has been assigned to your account.</p>
+    {% else %}
+      <p>No XLSForm has been imported yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

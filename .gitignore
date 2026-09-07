@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+instance/*.db
+instance/uploads/*
+instance/exports/*
+!instance/uploads/.gitkeep
+!instance/exports/.gitkeep
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

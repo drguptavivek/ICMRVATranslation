@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}View Changes - ICMRVA Tool Review{% endblock %}
+
+{% block content %}
+  <h1 class="h3 mb-3">View Changes</h1>
+  <dl class="row">
+    <dt class="col-sm-3">Reviewer</dt>
+    <dd class="col-sm-9">{{ assignment.reviewer.username }}</dd>
+    <dt class="col-sm-3">Language</dt>
+    <dd class="col-sm-9">{{ assignment.language.display_name }}</dd>
+    <dt class="col-sm-3">XLSForm</dt>
+    <dd class="col-sm-9">{{ assignment.xlsform.form_title or assignment.xlsform.original_filename }}</dd>
+  </dl>
+
+  <div class="table-responsive">
+    <table class="table align-middle">
+      <thead>
+        <tr>
+          <th>Sheet</th>
+          <th>Excel Row</th>
+          <th>Variable / Choice</th>
+          <th>English</th>
+          <th>Original Translation</th>
+          <th>Edited Translation</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.review.sheet_name }}</td>
+            <td>{{ row.review.row_number }}</td>
+            <td>{{ row.variable }}</td>
+            <td class="white-space-pre-line">{{ row.english }}</td>
+            <td class="white-space-pre-line">{{ row.review.extracted_translation }}</td>
+            <td class="white-space-pre-line">{{ row.review.edited_translation }}</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="6">No changed values have been saved.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}
