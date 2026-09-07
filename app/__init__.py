@@ -46,13 +46,14 @@ def create_app(config_class=Config):
 
     @app.context_processor
     def add_content_security_policy_nonce():
-        return {"csp_nonce": g.csp_nonce}
+        return {"csp_nonce": getattr(g, "csp_nonce", "")}
 
     @app.after_request
     def add_security_headers(response):
+        csp_nonce = getattr(g, "csp_nonce", "")
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            f"script-src 'self' 'nonce-{g.csp_nonce}' https://cdn.jsdelivr.net; "
+            f"script-src 'self' 'nonce-{csp_nonce}' https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "img-src 'self' data:; "
             "connect-src 'self'; "

@@ -7,9 +7,19 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 
 REQUIRED_SHEETS = ("survey", "choices", "settings")
+TRANSLATABLE_FIELDS = (
+    "label",
+    "hint",
+    "constraint_message",
+    "required_message",
+    "guidance_hint",
+)
 LANGUAGE_HEADER_PREFIX = "label::"
 ENGLISH_LABEL_HEADER = "label::English (en)"
-LANGUAGE_RE = re.compile(r"^label::(?P<name>.+?)(?:\s*\((?P<code>[^()]*)\)\s*)?$")
+LANGUAGE_RE = re.compile(
+    rf"^(?P<field>{'|'.join(TRANSLATABLE_FIELDS)})::(?P<name>.+?)(?:\s*\((?P<code>[^()]*)\)\s*)?$",
+    re.IGNORECASE,
+)
 
 
 class XLSFormValidationError(Exception):
@@ -223,10 +233,15 @@ def _detect_languages(headers):
     detected = []
     seen = set()
     for header in headers:
-        if not header.startswith(LANGUAGE_HEADER_PREFIX) or header in seen:
+        match = LANGUAGE_RE.match(header)
+        if not match:
             continue
-        seen.add(header)
-        detected.append(_parse_language_header(header))
+        language = _parse_language_header(header)
+        key = ((language.language_code or "").casefold(), language.display_name.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        detected.append(language)
     return detected
 
 
@@ -249,8 +264,12 @@ def _survey_list_name(type_value):
 def _parse_language_header(header):
     match = LANGUAGE_RE.match(header)
     if not match:
-        display_name = header.removeprefix(LANGUAGE_HEADER_PREFIX).strip()
-        return DetectedLanguage(display_name=display_name, language_code=None, excel_header=header)
+        display_name = header.split("::", 1)[-1].strip()
+        return DetectedLanguage(
+            display_name=display_name,
+            language_code=None,
+            excel_header=f"{LANGUAGE_HEADER_PREFIX}{display_name}",
+        )
 
     display_name = match.group("name").strip()
     language_code = match.group("code")
@@ -259,8 +278,41 @@ def _parse_language_header(header):
     return DetectedLanguage(
         display_name=display_name,
         language_code=language_code,
-        excel_header=header,
+        excel_header=(
+            header
+            if match.group("field").casefold() == "label"
+            else f"{LANGUAGE_HEADER_PREFIX}{header.split('::', 1)[-1]}"
+        ),
     )
+
+
+def localized_header(field_name, label_header):
+    suffix = label_header.split("::", 1)[-1]
+    return f"{field_name}::{suffix}"
+
+
+def english_header(field_name):
+    return localized_header(field_name, ENGLISH_LABEL_HEADER)
+
+
+def find_localized_header(headers, field_name, label_header):
+    target = LANGUAGE_RE.match(label_header)
+    if target:
+        target_name = target.group("name").strip().casefold()
+        target_code = (target.group("code") or "").strip().casefold()
+        for header in headers:
+            if not isinstance(header, str):
+                continue
+            match = LANGUAGE_RE.match(header)
+            if not match or match.group("field").casefold() != field_name.casefold():
+                continue
+            name = match.group("name").strip().casefold()
+            code = (match.group("code") or "").strip().casefold()
+            if target_code and code == target_code:
+                return header
+            if not target_code and name == target_name:
+                return header
+    return localized_header(field_name, label_header)
 
 
 def _cell_starts_with_english_reference(english, original):

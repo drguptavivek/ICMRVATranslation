@@ -19,6 +19,7 @@
         <tr>
           <th>Sheet</th>
           <th>Excel Row</th>
+          <th>Field</th>
           <th>Variable / Choice</th>
           <th>English</th>
           <th>Original Translation</th>
@@ -30,6 +31,7 @@
           <tr>
             <td>{{ row.review.sheet_name }}</td>
             <td>{{ row.review.row_number }}</td>
+            <td>{{ row.field_name }}</td>
             <td>{{ row.variable }}</td>
             <td class="white-space-pre-line">{{ row.english }}</td>
             <td class="white-space-pre-line">{{ row.review.extracted_translation }}</td>
@@ -37,7 +39,7 @@
           </tr>
         {% else %}
           <tr>
-            <td colspan="6">No changed values have been saved.</td>
+            <td colspan="7">No changed values have been saved.</td>
           </tr>
         {% endfor %}
       </tbody>

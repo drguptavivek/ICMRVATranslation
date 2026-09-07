@@ -2,9 +2,10 @@ from flask import Blueprint, abort, flash, jsonify, redirect, render_template, r
 from flask_login import current_user, login_required
 
 from app.extensions import db
-from app.services.display_text import clean_html_for_display, clean_text_for_display
+from app.services.display_text import clean_html_for_display, clean_text_for_display, sanitize_rich_html
 from app.services.translation_links import google_translate_language_code
 from app.services.review_workflow import (
+    SUPPORTING_FIELDS,
     assigned_language_for_user,
     build_review_rows,
     changed_reviews_for_assignment,
@@ -72,7 +73,25 @@ def review():
     assignment.mark_opened()
     db.session.commit()
 
-    review_rows = build_review_rows(xlsform, language, current_user)
+    per_page = 50
+    total_questions = reviewable_count(xlsform)
+    total_pages = max(1, (total_questions + per_page - 1) // per_page)
+    try:
+        page = int(request.args.get("page", 1))
+    except (TypeError, ValueError):
+        page = 1
+    page = min(max(page, 1), total_pages)
+    page_window_size = 15
+    page_start = max(1, page - page_window_size // 2)
+    page_end = min(total_pages, page_start + page_window_size - 1)
+    page_start = max(1, page_end - page_window_size + 1)
+    review_rows = build_review_rows(
+        xlsform,
+        language,
+        current_user,
+        offset=(page - 1) * per_page,
+        limit=per_page,
+    )
     history_entries = history_entries_for_assignment(assignment)
 
     return render_template(
@@ -83,6 +102,10 @@ def review():
         assignment=assignment,
         review_rows=review_rows,
         history_entries=history_entries,
+        page=page,
+        total_pages=total_pages,
+        total_questions=total_questions,
+        page_numbers=range(page_start, page_end + 1),
     )
 
 
@@ -104,20 +127,27 @@ def save_review_item(item_id):
         abort(403)
 
     choice_values = {}
+    supporting_values = {}
     for key, value in request.form.items():
         if key.startswith("choice_"):
             try:
-                choice_values[int(key.removeprefix("choice_"))] = str(clean_html_for_display(value))
+                choice_values[int(key.removeprefix("choice_"))] = str(sanitize_rich_html(value))
             except ValueError:
                 continue
+        elif key.startswith("field_"):
+            field_name = key.removeprefix("field_")
+            if field_name in SUPPORTING_FIELDS:
+                supporting_values[field_name] = str(sanitize_rich_html(value))
 
+    submitted_translation = str(sanitize_rich_html(request.form.get("question_translation", "").strip()))
     item, changed_count, is_edited = save_question_with_choices(
         current_user,
         xlsform,
         language,
         item_id,
-        str(clean_html_for_display(request.form.get("question_translation", ""))),
+        submitted_translation,
         choice_values,
+        supporting_values,
     )
     if item is None:
         abort(404)
@@ -127,10 +157,15 @@ def save_review_item(item_id):
             "status": "saved",
             "changed_count": changed_count,
             "question_id": item.id,
-            "translation": request.form.get("question_translation", "").strip(),
-            "translation_html": str(clean_html_for_display(request.form.get("question_translation", "").strip())),
+            "translation": submitted_translation,
+            "translation_html": str(clean_html_for_display(submitted_translation)),
             "choices": {str(key): value.strip() for key, value in choice_values.items()},
             "choice_html": {str(key): str(clean_html_for_display(value.strip())) for key, value in choice_values.items()},
+            "supporting": supporting_values,
+            "supporting_html": {
+                key: str(clean_html_for_display(value.strip()))
+                for key, value in supporting_values.items()
+            },
             "is_edited": is_edited,
         }
     )

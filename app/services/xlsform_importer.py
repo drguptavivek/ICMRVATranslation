@@ -2,7 +2,12 @@ from dataclasses import dataclass
 
 from app.extensions import db
 from app.models import ChoiceItem, Language, SurveyItem, TranslationReview
-from app.services.xlsform_parser import parse_translation_cell
+from app.services.xlsform_parser import (
+    ENGLISH_LABEL_HEADER,
+    TRANSLATABLE_FIELDS,
+    find_localized_header,
+    parse_translation_cell,
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,7 @@ def import_questionnaire_content(xlsform, parse_result):
             raw_row_data=parsed_item.raw_row_data,
             languages=languages,
             existing_reviews=existing_reviews,
+            field_names=TRANSLATABLE_FIELDS,
         )
 
     for parsed_item in parse_result.choice_items:
@@ -69,6 +75,7 @@ def import_questionnaire_content(xlsform, parse_result):
             raw_row_data=parsed_item.raw_row_data,
             languages=languages,
             existing_reviews=existing_reviews,
+            field_names=("label",),
         )
     return XLSFormImportResult(
         survey_items=survey_count,
@@ -102,7 +109,7 @@ def ensure_detected_languages(detected_languages):
 
 def _clear_existing_imported_content(xlsform):
     existing_reviews = {
-        (review.sheet_name, review.row_number, review.language_id): {
+        (review.sheet_name, review.row_number, review.field_name, review.language_id): {
             "edited_translation": review.edited_translation,
             "edited_by": review.edited_by,
             "edited_at": review.edited_at,
@@ -131,30 +138,47 @@ def _languages_by_header(detected_languages):
     }
 
 
-def _add_translation_reviews(xlsform, sheet_name, row_number, english_label, raw_row_data, languages, existing_reviews):
+def _add_translation_reviews(
+    xlsform,
+    sheet_name,
+    row_number,
+    english_label,
+    raw_row_data,
+    languages,
+    existing_reviews,
+    field_names,
+):
     count = 0
     for excel_header, language in languages.items():
-        parsed_translation = parse_translation_cell(english_label, raw_row_data.get(excel_header))
-        existing = existing_reviews.get((sheet_name, row_number, language.id), {})
-        edited_translation = existing.get("edited_translation")
-        if edited_translation is None:
-            edited_translation = parsed_translation.extracted_translation
-        db.session.add(
-            TranslationReview(
-                xlsform=xlsform,
-                sheet_name=sheet_name,
-                row_number=row_number,
-                language_id=language.id,
-                original_cell_value=parsed_translation.original_cell_value,
-                extracted_translation=parsed_translation.extracted_translation,
-                edited_translation=edited_translation,
-                edited_by=existing.get("edited_by"),
-                edited_at=existing.get("edited_at"),
-                reviewed_at=existing.get("reviewed_at"),
-                status=existing.get("status") or TranslationReview.STATUS_PENDING,
+        for field_name in field_names:
+            english_field_header = find_localized_header(raw_row_data, field_name, ENGLISH_LABEL_HEADER)
+            english_value = english_label if field_name == "label" else raw_row_data.get(english_field_header)
+            target_header = find_localized_header(raw_row_data, field_name, excel_header)
+            original_value = raw_row_data.get(target_header)
+            if english_value is None and original_value is None:
+                continue
+            parsed_translation = parse_translation_cell(english_value, original_value)
+            existing = existing_reviews.get((sheet_name, row_number, field_name, language.id), {})
+            edited_translation = existing.get("edited_translation")
+            if edited_translation is None:
+                edited_translation = parsed_translation.extracted_translation
+            db.session.add(
+                TranslationReview(
+                    xlsform=xlsform,
+                    sheet_name=sheet_name,
+                    row_number=row_number,
+                    field_name=field_name,
+                    language_id=language.id,
+                    original_cell_value=parsed_translation.original_cell_value,
+                    extracted_translation=parsed_translation.extracted_translation,
+                    edited_translation=edited_translation,
+                    edited_by=existing.get("edited_by"),
+                    edited_at=existing.get("edited_at"),
+                    reviewed_at=existing.get("reviewed_at"),
+                    status=existing.get("status") or TranslationReview.STATUS_PENDING,
+                )
             )
-        )
-        count += 1
+            count += 1
     return count
 
 

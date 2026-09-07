@@ -91,23 +91,28 @@ def clean_text_for_display(value):
 
 
 def clean_html_for_display(value):
+    return sanitize_rich_html(value, preserve_references=False)
+
+
+def sanitize_rich_html(value, preserve_references=True):
     if value is None:
         return Markup("")
-    parser = _SafeRichTextParser()
+    parser = _SafeRichTextParser(preserve_references=preserve_references)
     parser.feed(unescape(str(value)))
     parser.close()
     return Markup("".join(parser.parts))
 
 
 class _SafeRichTextParser(HTMLParser):
-    ALLOWED_TAGS = {"b", "strong", "i", "em", "u", "br", "p", "div", "span", "ul", "ol", "li"}
+    ALLOWED_TAGS = {"b", "strong", "i", "em", "u", "br", "p", "div", "span", "font", "ul", "ol", "li"}
     SKIP_TAGS = {"script", "style", "iframe", "object"}
     COLOR_RE = re.compile(r"^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,24}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\))$")
 
-    def __init__(self):
+    def __init__(self, preserve_references=True):
         super().__init__(convert_charrefs=True)
         self.parts = []
         self._skip_depth = 0
+        self.preserve_references = preserve_references
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
@@ -116,12 +121,12 @@ class _SafeRichTextParser(HTMLParser):
             return
         if self._skip_depth or tag not in self.ALLOWED_TAGS:
             return
-        attribute = ""
-        if tag == "span":
-            style = dict(attrs).get("style", "")
-            match = re.fullmatch(r"\s*color\s*:\s*([^;]+)\s*;?\s*", style, re.IGNORECASE)
-            if match and self.COLOR_RE.fullmatch(match.group(1).strip()):
-                attribute = f' style="color:{escape(match.group(1).strip(), quote=True)}"'
+        attributes = dict(attrs)
+        if tag == "font":
+            tag = "span"
+            attributes = {"style": f"color:{attributes.get('color', '')}"}
+        style = self._safe_style(attributes.get("style", "")) if tag == "span" else ""
+        attribute = f' style="{escape(style, quote=True)}"' if style else ""
         self.parts.append(f"<{tag}{attribute}>")
 
     def handle_startendtag(self, tag, attrs):
@@ -134,14 +139,32 @@ class _SafeRichTextParser(HTMLParser):
             self._skip_depth -= 1
             return
         if not self._skip_depth and tag in self.ALLOWED_TAGS and tag != "br":
-            self.parts.append(f"</{tag}>")
+            self.parts.append(f"</{'span' if tag == 'font' else tag}>")
 
     def handle_data(self, data):
         if self._skip_depth:
             return
-        text = XLSFORM_REFERENCE_RE.sub("", data)
+        text = data if self.preserve_references else XLSFORM_REFERENCE_RE.sub("", data)
         safe = escape(text)
         safe = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", safe)
         safe = re.sub(r"(?<!\*)\*([^*]+?)\*(?!\*)", r"<em>\1</em>", safe)
         safe = re.sub(r"(?m)^#{1,6}\s*", "", safe)
         self.parts.append(safe)
+
+    def _safe_style(self, value):
+        allowed = []
+        for declaration in value.split(";"):
+            if ":" not in declaration:
+                continue
+            property_name, property_value = (part.strip() for part in declaration.split(":", 1))
+            property_name = property_name.lower()
+            property_value = property_value.strip()
+            if property_name == "color" and self.COLOR_RE.fullmatch(property_value):
+                allowed.append(f"color:{property_value}")
+            elif property_name == "font-weight" and property_value.lower() in {"bold", "bolder", "600", "700", "800", "900"}:
+                allowed.append("font-weight:bold")
+            elif property_name == "font-style" and property_value.lower() in {"italic", "oblique"}:
+                allowed.append("font-style:italic")
+            elif property_name == "text-decoration" and property_value.lower() == "underline":
+                allowed.append(f"text-decoration:{property_value.lower()}")
+        return ";".join(allowed)

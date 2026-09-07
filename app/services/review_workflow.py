@@ -9,8 +9,20 @@ from app.models import (
     TranslationReview,
     XLSForm,
 )
-from app.services.display_text import clean_html_for_display, clean_text_for_display
-from app.services.xlsform_parser import parse_translation_cell
+from app.services.display_text import clean_html_for_display, clean_text_for_display, sanitize_rich_html
+from app.services.xlsform_parser import (
+    ENGLISH_LABEL_HEADER,
+    find_localized_header,
+    parse_translation_cell,
+)
+
+
+SUPPORTING_FIELDS = {
+    "hint": "Hint",
+    "guidance_hint": "Guidance",
+    "constraint_message": "Validation",
+    "required_message": "Required Message",
+}
 
 
 TECHNICAL_TYPES = {"begin_group", "begin repeat", "end_group", "end repeat"}
@@ -111,6 +123,7 @@ def build_review_layout(xlsform, language, user=None):
                     "english": clean_text_for_display(choice.english_label or choice.name),
                     "value": clean_text_for_display(choice_value),
                     "value_html": clean_html_for_display(choice_value),
+                    "editor_html": str(sanitize_rich_html(choice_value)),
                 }
             )
         question_value = value_for_item(item, language, reviews, "survey")
@@ -136,15 +149,19 @@ def build_review_layout(xlsform, language, user=None):
     return _prune_empty_groups(roots)
 
 
-def build_review_rows(xlsform, language, user=None):
+def build_review_rows(xlsform, language, user=None, offset=0, limit=None):
     query = displayed_survey_items_query(xlsform)
+    if offset:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     items = query.all()
     choices_by_list = choice_items_by_list_name(xlsform)
     reviews = reviews_by_key(xlsform, language)
     edited_question_ids = edited_question_ids_for_reviews(items, choices_by_list, reviews, user)
     rows = []
 
-    for offset, item in enumerate(items, start=1):
+    for serial, item in enumerate(items, start=offset + 1):
         choice_rows = []
         for choice in visible_choices_for_item(item, choices_by_list, language):
             choice_value = value_for_item(choice, language, reviews, "choices")
@@ -155,34 +172,80 @@ def build_review_rows(xlsform, language, user=None):
                     "english_text": clean_text_for_display(choice.english_label or choice.name),
                     "value": clean_text_for_display(choice_value),
                     "value_html": clean_html_for_display(choice_value),
+                    "editor_html": str(sanitize_rich_html(choice_value)),
                 }
             )
         value = value_for_item(item, language, reviews, "survey")
+        supporting_fields = build_supporting_fields(item, language, reviews)
+        translate_parts = [display_question_label(item)]
+        translate_parts.extend(
+            f'Option: {choice["english_text"]}'
+            for choice in choice_rows
+            if choice["english_text"]
+        )
+        translate_parts.extend(
+            f'{field["label"]}: {field["english_text"]}'
+            for field in supporting_fields
+            if field["english_text"]
+        )
         rows.append(
             {
-                "serial": offset,
+                "serial": serial,
                 "question": item,
                 "english": clean_html_for_display(_question_label_source(item)),
                 "english_text": display_question_label(item),
+                "translate_text": "\n\n".join(translate_parts),
                 "value": clean_text_for_display(value),
                 "value_html": clean_html_for_display(value),
+                "editor_html": str(sanitize_rich_html(value)),
                 "type_label": "Note" if (item.type or "").split(maxsplit=1)[0] == "note" else None,
                 "control_type": choice_control_type(item),
                 "is_edited": item.id in edited_question_ids,
                 "choices": choice_rows,
                 "modal_choices": [
-                    {"id": row["choice"].id, "english": row["english_text"], "value": str(row["value_html"])}
+                    {
+                        "id": row["choice"].id,
+                        "english": row["english_text"],
+                        "english_html": str(row["english"]),
+                        "value": row["editor_html"],
+                    }
                     for row in choice_rows
                 ],
-                "english_messages": supporting_messages(item.raw_row_data or {}, "English"),
-                "local_messages": supporting_messages(
-                    item.raw_row_data or {},
-                    language.display_name,
-                    language.language_code,
-                ),
+                "supporting_fields": supporting_fields,
+                "english_messages": [
+                    {"label": field["label"], "value_html": field["english_html"]}
+                    for field in supporting_fields
+                ],
+                "local_messages": [
+                    {"label": field["label"], "value_html": field["value_html"], "field_name": field["field_name"]}
+                    for field in supporting_fields
+                ],
             }
         )
     return rows
+
+
+def build_supporting_fields(item, language, reviews):
+    fields = []
+    raw_row_data = item.raw_row_data or {}
+    for field_name, label in SUPPORTING_FIELDS.items():
+        english_value = raw_row_data.get(find_localized_header(raw_row_data, field_name, ENGLISH_LABEL_HEADER))
+        target_header = find_localized_header(raw_row_data, field_name, language.excel_header)
+        review = reviews.get(("survey", item.row_number, field_name))
+        if english_value is None and raw_row_data.get(target_header) is None and review is None:
+            continue
+        value = value_for_item(item, language, reviews, "survey", field_name)
+        fields.append(
+            {
+                "field_name": field_name,
+                "label": label,
+                "english_text": clean_text_for_display(english_value),
+                "english_html": clean_html_for_display(english_value),
+                "value_html": clean_html_for_display(value),
+                "editor_html": str(sanitize_rich_html(value)),
+            }
+        )
+    return fields
 
 
 def supporting_messages(raw_row_data, language_marker, language_code=None):
@@ -228,7 +291,7 @@ def reviews_by_key(xlsform, language):
         xlsform_id=xlsform.id,
         language_id=language.id,
     ).all()
-    return {(review.sheet_name, review.row_number): review for review in reviews}
+    return {(review.sheet_name, review.row_number, review.field_name): review for review in reviews}
 
 
 def edited_question_ids_for_reviews(displayed_items, choices_by_list, reviews, user=None):
@@ -239,7 +302,7 @@ def edited_question_ids_for_reviews(displayed_items, choices_by_list, reviews, u
             choice_parent_by_row[choice.row_number] = item.id
 
     edited_question_ids = set()
-    for (sheet_name, row_number), review in reviews.items():
+    for (sheet_name, row_number, _field_name), review in reviews.items():
         if not review_is_changed(review):
             continue
         if user is not None and review.edited_by != user.id:
@@ -252,14 +315,21 @@ def edited_question_ids_for_reviews(displayed_items, choices_by_list, reviews, u
 
 
 def review_is_changed(review):
-    return (review.edited_translation or "") != (review.extracted_translation or "")
+    return sanitize_rich_html(review.edited_translation or "") != sanitize_rich_html(review.extracted_translation or "")
 
 
-def value_for_item(item, language, reviews, sheet_name):
-    review = reviews.get((sheet_name, item.row_number))
+def value_for_item(item, language, reviews, sheet_name, field_name="label"):
+    review = reviews.get((sheet_name, item.row_number, field_name))
     if review is not None and review.edited_translation is not None:
         return review.edited_translation
-    parsed = parse_translation_cell(item.english_label, (item.raw_row_data or {}).get(language.excel_header))
+    raw_row_data = item.raw_row_data or {}
+    english_value = (
+        item.english_label
+        if field_name == "label"
+        else raw_row_data.get(find_localized_header(raw_row_data, field_name, ENGLISH_LABEL_HEADER))
+    )
+    target_header = find_localized_header(raw_row_data, field_name, language.excel_header)
+    parsed = parse_translation_cell(english_value, (item.raw_row_data or {}).get(target_header))
     return parsed.extracted_translation or ""
 
 
@@ -285,9 +355,10 @@ def save_complete_form(user, xlsform, language, form_data):
             english_label=item.english_label,
             raw_row_data=item.raw_row_data or {},
             submitted=submitted,
-            existing=reviews.get(("survey", item.row_number)),
+            existing=reviews.get(("survey", item.row_number, "label")),
+            field_name="label",
         )
-        reviews[("survey", item.row_number)] = review
+        reviews[("survey", item.row_number, "label")] = review
         changed_count += int(changed)
 
         for choice in visible_choices_for_item(item, choices_by_list, language):
@@ -305,16 +376,25 @@ def save_complete_form(user, xlsform, language, form_data):
                 english_label=choice.english_label,
                 raw_row_data=choice.raw_row_data or {},
                 submitted=submitted_choice,
-                existing=reviews.get(("choices", choice.row_number)),
+                existing=reviews.get(("choices", choice.row_number, "label")),
+                field_name="label",
             )
-            reviews[("choices", choice.row_number)] = review
+            reviews[("choices", choice.row_number, "label")] = review
             changed_count += int(changed)
 
     assignment.mark_saved()
     return changed_count
 
 
-def save_question_with_choices(user, xlsform, language, question_id, question_value, choice_values):
+def save_question_with_choices(
+    user,
+    xlsform,
+    language,
+    question_id,
+    question_value,
+    choice_values,
+    supporting_values=None,
+):
     assignment = get_or_create_form_assignment(user, xlsform, language)
     editable_questions = {item.id: item for item in displayed_survey_items_query(xlsform).all()}
     item = editable_questions.get(question_id)
@@ -339,10 +419,35 @@ def save_question_with_choices(user, xlsform, language, question_id, question_va
         english_label=item.english_label,
         raw_row_data=item.raw_row_data or {},
         submitted=(question_value or "").strip(),
-        existing=reviews.get(("survey", item.row_number)),
+        existing=reviews.get(("survey", item.row_number, "label")),
+        field_name="label",
     )
-    reviews[("survey", item.row_number)] = review
+    reviews[("survey", item.row_number, "label")] = review
     changed_count += int(changed)
+
+    for field_name, submitted_value in (supporting_values or {}).items():
+        if field_name not in SUPPORTING_FIELDS:
+            continue
+        raw_row_data = item.raw_row_data or {}
+        english_value = raw_row_data.get(find_localized_header(raw_row_data, field_name, ENGLISH_LABEL_HEADER))
+        if english_value is None:
+            continue
+        review, changed = _save_item_value(
+            user=user,
+            xlsform=xlsform,
+            language=language,
+            sheet_name="survey",
+            row_number=item.row_number,
+            field_name=field_name,
+            item_type=SUPPORTING_FIELDS[field_name],
+            question_id=item.name,
+            english_label=english_value,
+            raw_row_data=item.raw_row_data or {},
+            submitted=(submitted_value or "").strip(),
+            existing=reviews.get(("survey", item.row_number, field_name)),
+        )
+        reviews[("survey", item.row_number, field_name)] = review
+        changed_count += int(changed)
 
     for choice_id, submitted_value in choice_values.items():
         choice = choices_by_id.get(choice_id)
@@ -359,9 +464,10 @@ def save_question_with_choices(user, xlsform, language, question_id, question_va
             english_label=choice.english_label,
             raw_row_data=choice.raw_row_data or {},
             submitted=(submitted_value or "").strip(),
-            existing=reviews.get(("choices", choice.row_number)),
+            existing=reviews.get(("choices", choice.row_number, "label")),
+            field_name="label",
         )
-        reviews[("choices", choice.row_number)] = review
+        reviews[("choices", choice.row_number, "label")] = review
         changed_count += int(changed)
 
     assignment.mark_saved()
@@ -511,8 +617,10 @@ def _save_item_value(
     raw_row_data,
     submitted,
     existing,
+    field_name="label",
 ):
-    parsed = parse_translation_cell(english_label, raw_row_data.get(language.excel_header))
+    target_header = find_localized_header(raw_row_data, field_name, language.excel_header)
+    parsed = parse_translation_cell(english_label, raw_row_data.get(target_header))
     baseline = parsed.extracted_translation or ""
     review = existing
     if review is None:
@@ -520,6 +628,7 @@ def _save_item_value(
             xlsform_id=xlsform.id,
             sheet_name=sheet_name,
             row_number=row_number,
+            field_name=field_name,
             language_id=language.id,
             original_cell_value=parsed.original_cell_value,
             extracted_translation=parsed.extracted_translation,
@@ -529,7 +638,8 @@ def _save_item_value(
         db.session.add(review)
 
     current = review.edited_translation if review.edited_translation is not None else baseline
-    if submitted == current:
+    submitted = str(sanitize_rich_html(submitted))
+    if sanitize_rich_html(submitted) == sanitize_rich_html(current):
         return review, False
 
     db.session.add(
@@ -539,6 +649,7 @@ def _save_item_value(
             language_id=language.id,
             sheet_name=sheet_name,
             row_number=row_number,
+            field_name=field_name,
             item_type=item_type,
             question_id=question_id,
             english_value=english_label,

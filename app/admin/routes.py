@@ -18,6 +18,7 @@ from app.models import (
     XLSForm,
 )
 from app.services.xlsform_importer import ensure_detected_languages, import_questionnaire_content
+from app.services.xlsform_parser import english_header
 from app.services.xlsform_parser import XLSFormValidationError, parse_xlsform
 from app.services.review_workflow import changed_reviews_for_assignment
 from app.services.xlsform_exporter import XLSFormExportError, export_reviewed_xlsform
@@ -180,7 +181,13 @@ def view_assignment_changes(assignment_id):
         if review.sheet_name == "survey":
             source_item = survey_items.get(review.row_number)
             variable = source_item.name if source_item else ""
-            english = source_item.english_label if source_item else ""
+            english = (
+                source_item.english_label
+                if source_item and review.field_name == "label"
+                else (source_item.raw_row_data or {}).get(english_header(review.field_name), "")
+                if source_item
+                else ""
+            )
         else:
             source_item = choice_items.get(review.row_number)
             variable = source_item.name if source_item else ""
@@ -190,6 +197,7 @@ def view_assignment_changes(assignment_id):
                 "review": review,
                 "variable": variable,
                 "english": english,
+                "field_name": review.field_name,
             }
         )
     return render_template(

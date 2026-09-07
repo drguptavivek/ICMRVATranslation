@@ -712,13 +712,42 @@ class CompactReviewerWorkflowTestCase(unittest.TestCase):
         response = self.client.get("/reviewer/review")
         css = (Path("app") / "static" / "css" / "app.css").read_text(encoding="utf-8")
 
-        self.assertIn(b"modal-dialog modal-dialog-scrollable modal-lg review-edit-modal-dialog", response.data)
+        self.assertIn(b"modal-dialog modal-dialog-scrollable modal-xl review-edit-modal-dialog", response.data)
         self.assertIn(b">Save</button>", response.data)
         self.assertIn("max-height: 90vh", css)
         self.assertIn("max-height: calc(90vh - 140px)", css)
         self.assertIn("overflow-y: auto", css)
         self.assertIn("position: sticky", css)
         self.assertIn("word-break: break-word", css)
+
+    def test_review_questions_are_paginated_fifty_per_page_with_numbered_rail(self):
+        for index in range(60):
+            db.session.add(
+                SurveyItem(
+                    xlsform_id=self.xlsform.id,
+                    sheet_name="survey",
+                    row_number=100 + index,
+                    type="text",
+                    name=f"extra_{index}",
+                    english_label=f"Extra question {index}",
+                    raw_row_data={
+                        "label::English (en)": f"Extra question {index}",
+                        "label::Hindi (hi)": f"Extra question {index}\nAtirikt {index}",
+                    },
+                    is_group=False,
+                )
+            )
+        db.session.commit()
+        self.login()
+
+        first_page = self.client.get("/reviewer/review?page=1")
+        second_page = self.client.get("/reviewer/review?page=2")
+
+        self.assertEqual(first_page.data.count(b'class="compact-question'), 50)
+        self.assertIn(b'aria-current="page">1</a>', first_page.data)
+        self.assertIn(b'href="/reviewer/review?page=2"', first_page.data)
+        self.assertIn(b'aria-current="page">2</a>', second_page.data)
+        self.assertLessEqual(second_page.data.count(b'class="compact-question'), 50)
 
     def test_admin_download_missing_target_language_header_is_controlled(self):
         self.login()
@@ -753,9 +782,7 @@ class CompactReviewerWorkflowTestCase(unittest.TestCase):
         self.assertIn(b"Did have fever?", response.data)
         self.assertNotIn(b"${deceased_name}", response.data)
         self.assertNotIn(b"${age}", response.data)
-        self.assertNotIn(b"${respondent_name}", response.data)
         self.assertNotIn(b"${group_ref}", response.data)
-        self.assertNotIn(b"${symptom_ref}", response.data)
         self.assertNotIn(b"${name}", response.data)
         self.assertNotIn(b"&lt;b&gt;", response.data)
         self.assertNotIn(b"&lt;/b&gt;", response.data)
@@ -765,6 +792,63 @@ class CompactReviewerWorkflowTestCase(unittest.TestCase):
         self.assertNotIn(b"&lt;font", response.data)
         self.assertNotIn(b"alert(1)", response.data)
         self.assertNotIn(b"onclick", response.data)
+
+    def test_reviewer_display_and_edit_modal_keep_inline_formatting(self):
+        self.login()
+        response = self.client.get("/reviewer/review")
+
+        self.assertIn(b"data-english-html=", response.data)
+
+        item = SurveyItem.query.filter_by(name="Id10016").first()
+        save_response = self.client.post(
+            f"/reviewer/review/{item.id}/save",
+            data={
+                "question_translation": '<font color="#dc3545"><b>Prashn 16</b></font>',
+            },
+        )
+
+        self.assertEqual(save_response.get_json()["translation_html"], '<span style="color:#dc3545"><b>Prashn 16</b></span>')
+        refreshed = self.client.get("/reviewer/review")
+        self.assertIn(b'<span style="color:#dc3545"><b>Prashn 16</b></span>', refreshed.data)
+
+    def test_supporting_fields_are_imported_displayed_saved_and_exported(self):
+        self.login()
+        item = SurveyItem.query.filter_by(name="Id10016").first()
+
+        self.assertEqual(self.review("survey", item.row_number, field_name="hint").extracted_translation, "Hindi hint")
+        page = self.client.get("/reviewer/review")
+        self.assertIn(b"English hint", page.data)
+        self.assertIn(b"Hindi hint", page.data)
+        self.assertIn(b"English guidance", page.data)
+        self.assertIn(b"English validation", page.data)
+
+        response = self.client.post(
+            f"/reviewer/review/{item.id}/save",
+            data={
+                "question_translation": "Prashn 16",
+                "field_hint": '<b>Edited hint ${age}</b>',
+                "field_guidance_hint": '<span style="color:red">Edited guidance</span>',
+                "field_constraint_message": "Edited validation",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            self.review("survey", item.row_number, field_name="hint").edited_translation,
+            '<b>Edited hint ${age}</b>',
+        )
+
+        assignment = ReviewerFormAssignment.query.filter_by(user_id=self.reviewer.id).first()
+        self.client.post("/logout")
+        self.login("admin")
+        exported_response = self.client.get(f"/admin/assignments/{assignment.id}/download")
+        exported = load_workbook(io.BytesIO(exported_response.data), data_only=True)
+
+        self.assertEqual(exported["survey"]["J18"].value, "English hint\n<b>Edited hint ${age}</b>")
+        self.assertEqual(
+            exported["survey"]["L18"].value,
+            '<span style="color:blue"><b>English guidance</b></span>\n<span style="color:red">Edited guidance</span>',
+        )
+        self.assertEqual(exported["survey"]["N18"].value, "English validation\nEdited validation")
 
     def test_original_database_and_workbook_values_keep_html_markup(self):
         original_path = Path(self.app.config["UPLOAD_FOLDER"]) / self.xlsform.stored_filename
@@ -806,6 +890,25 @@ class CompactReviewerWorkflowTestCase(unittest.TestCase):
         self.assertEqual(exported["survey"]["F23"].value, "${age} > 0")
         self.assertEqual(exported["survey"]["H26"].value, "${age} + 1")
         self.assertEqual(exported["choices"]["D4"].value, "<font>Fever</font>\n<span>Bukhar ${symptom_ref}</span>")
+
+    def test_export_preserves_inline_translation_markup(self):
+        self.login()
+        item = SurveyItem.query.filter_by(name="Id10016").first()
+        self.client.post(
+            f"/reviewer/review/{item.id}/save",
+            data={"question_translation": '<span style="color:#dc3545"><strong>Prashn 16</strong></span>'},
+        )
+        assignment = ReviewerFormAssignment.query.filter_by(user_id=self.reviewer.id).first()
+
+        self.client.post("/logout")
+        self.login("admin")
+        response = self.client.get(f"/admin/assignments/{assignment.id}/download")
+        exported = load_workbook(io.BytesIO(response.data), data_only=True)
+
+        self.assertEqual(
+            exported["survey"]["D18"].value,
+            "${Id10016} Question 16 English\n<span style=\"color:#dc3545\"><strong>Prashn 16</strong></span>",
+        )
 
     def test_admin_export_retains_complete_language_choice_list(self):
         self.login()
@@ -861,12 +964,13 @@ class CompactReviewerWorkflowTestCase(unittest.TestCase):
         )
         self.assertNotIn(b"Changed fields:", response.data)
 
-    def review(self, sheet_name, row_number, language=None):
+    def review(self, sheet_name, row_number, language=None, field_name="label"):
         language = language or self.hindi
         return TranslationReview.query.filter_by(
             xlsform_id=self.xlsform.id,
             sheet_name=sheet_name,
             row_number=row_number,
+            field_name=field_name,
             language_id=language.id,
         ).first()
 
@@ -893,6 +997,27 @@ class DisplayTextTestCase(unittest.TestCase):
         rendered = str(clean_html_for_display('## <span style="color:red">**INTRODUCTION**</span>'))
 
         self.assertEqual(rendered, '<span style="color:red"><strong>INTRODUCTION</strong></span>')
+
+    def test_css_inline_formatting_is_preserved(self):
+        rendered = str(clean_html_for_display(
+            '<span style="color: red; font-weight: 700; font-style: italic; text-decoration: underline">Text</span>'
+        ))
+
+        self.assertEqual(rendered, '<span style="color:red;font-weight:bold;font-style:italic;text-decoration:underline">Text</span>')
+
+    def test_font_color_is_normalized_to_supported_inline_markup(self):
+        self.assertEqual(
+            str(clean_html_for_display('<font color="#dc3545">Text</font>')),
+            '<span style="color:#dc3545">Text</span>',
+        )
+
+    def test_editor_markup_preserves_xlsform_references(self):
+        from app.services.display_text import sanitize_rich_html
+
+        self.assertEqual(
+            str(sanitize_rich_html('<b>Hello ${respondent_name}</b>')),
+            '<b>Hello ${respondent_name}</b>',
+        )
 
     def test_unsafe_html_is_removed_from_rich_text(self):
         rendered = str(clean_html_for_display('<span onclick="alert(1)">Safe</span><script>alert(1)</script>'))
@@ -1016,6 +1141,12 @@ def make_review_workbook():
             "relevant",
             "appearance",
             "calculation",
+            "hint::English (en)",
+            "hint::Hindi (hi)",
+            "guidance_hint::English (en)",
+            "guidance_hint::Hindi (hi)",
+            "constraint_message::English (en)",
+            "constraint_message::Hindi (hi)",
         ]
     )
     survey.append(["begin_group", "main_group", "<b>Main Group English ${group_ref}</b>", "<span>Main Group English ${group_ref}\nPramukh Samuh ${group_ref}</span>", "Main Group English\nTamil Group", None, None])
@@ -1033,6 +1164,13 @@ def make_review_workbook():
                 tamil_label,
                 None,
                 None,
+                None,
+                "English hint" if index == 16 else None,
+                "English hint\nHindi hint" if index == 16 else None,
+                '<span style="color:blue"><b>English guidance</b></span>' if index == 16 else None,
+                '<span style="color:blue"><b>English guidance</b></span>\nHindi guidance' if index == 16 else None,
+                "English validation" if index == 16 else None,
+                "English validation\nHindi validation" if index == 16 else None,
             ]
         )
     survey.append(["begin_group", "nested_group", "<div>Nested Group English</div>", "<p>Nested Group English<br>Antarik Samuh</p>", "Nested Group English\nNested Tamil", None, None])

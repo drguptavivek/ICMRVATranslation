@@ -10,8 +10,9 @@ class TranslationReview(db.Model):
             "xlsform_id",
             "sheet_name",
             "row_number",
+            "field_name",
             "language_id",
-            name="uq_translation_review_row_language",
+            name="uq_translation_review_row_field_language",
         ),
     )
 
@@ -23,6 +24,7 @@ class TranslationReview(db.Model):
     xlsform_id = db.Column(db.Integer, db.ForeignKey("xlsforms.id"), nullable=False, index=True)
     sheet_name = db.Column(db.String(40), nullable=False)
     row_number = db.Column(db.Integer, nullable=False)
+    field_name = db.Column(db.String(40), nullable=False, default="label")
     language_id = db.Column(db.Integer, db.ForeignKey("languages.id"), nullable=False, index=True)
     original_cell_value = db.Column(db.Text, nullable=True)
     extracted_translation = db.Column(db.Text, nullable=True)

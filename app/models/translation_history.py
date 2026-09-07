@@ -16,6 +16,7 @@ class TranslationHistory(db.Model):
     language_id = db.Column(db.Integer, db.ForeignKey("languages.id"), nullable=False, index=True)
     sheet_name = db.Column(db.String(40), nullable=False)
     row_number = db.Column(db.Integer, nullable=False)
+    field_name = db.Column(db.String(40), nullable=False, default="label")
     item_type = db.Column(db.String(40), nullable=False)
     question_id = db.Column(db.String(255), nullable=True)
     english_value = db.Column(db.Text, nullable=True)
