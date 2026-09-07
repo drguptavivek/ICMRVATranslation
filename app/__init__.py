@@ -3,6 +3,7 @@ import secrets
 from pathlib import Path
 
 from flask import Flask, g, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 
@@ -14,6 +15,13 @@ from .services.datetime_display import format_datetime_for_display
 def create_app(config_class=Config):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(config_class)
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=1,
+        x_proto=1,
+        x_host=1,
+        x_prefix=1,
+    )
     if app.config.get("SECRET_KEY") in {
         None,
         "",

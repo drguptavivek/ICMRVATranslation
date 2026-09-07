@@ -13,6 +13,7 @@ class Config:
         "sqlite:///xlsform_review.db",
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    APPLICATION_ROOT = os.environ.get("APPLICATION_ROOT", "/")
     WTF_CSRF_ENABLED = True
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"

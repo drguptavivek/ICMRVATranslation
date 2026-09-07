@@ -74,11 +74,37 @@ View application logs with:
 sudo journalctl -u icmrva.service -f
 ```
 
-## 6. HTTPS access
+## 6. HTTPS access under a URL path
 
-Keep Gunicorn bound to `127.0.0.1`. Publish the application through a local
-reverse proxy such as Nginx or Apache, terminate HTTPS there, and forward
-requests to `http://127.0.0.1:8000`.
+Keep Gunicorn bound to `127.0.0.1`. For deployment at
+`https://minerva.causeofdeathindia.com/icmrva/`, set
+`APPLICATION_ROOT=/icmrva` and `SESSION_COOKIE_SECURE=1` in
+`/etc/icmrva/icmrva.env`. Add these locations to the existing HTTPS Nginx
+server block for `minerva.causeofdeathindia.com`:
+
+```nginx
+location = /icmrva {
+    return 301 /icmrva/;
+}
+
+location /icmrva/ {
+    proxy_pass http://127.0.0.1:8000/;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Prefix /icmrva;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+    client_max_body_size 20m;
+}
+```
+
+The trailing slash on `proxy_pass` is required: Nginx removes `/icmrva/`
+before forwarding the request, while `X-Forwarded-Prefix` tells Flask to add
+the prefix to generated URLs and the session-cookie path.
 
 ## Updating the application
 
